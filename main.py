@@ -1,10 +1,11 @@
-import google.generativeai as genai
-import speech_recognition as sr
-import pyttsx3
-import os
+import streamlit as st
 from datetime import date
-import time
+import google.generativeai as genai
+import os
 from dotenv import load_dotenv
+import pyttsx3
+import speech_recognition as sr
+
 # Load environment variables
 load_dotenv()
 # Configure Google API key
@@ -31,66 +32,45 @@ def append2log(text):
     with open(fname, 'a') as f:
         f.write(text + '\n')
 
-def main():
+def process_request(request):
     global talk, today, model
+    append2log(f"You: {request}\n")
+    talk.append({'role': 'user', 'parts': [request]})
 
-    rec = sr.Recognizer()
+    response = model.generate_content(talk, stream=True)
+    response_text = ""
+    for chunk in response:
+        response_text += chunk.text + ' '
+        speak_text(chunk.text.replace("*", ""))
+    response_text = response_text.strip()
+
+    talk.append({'role': 'model', 'parts': [response_text]})
+    append2log(f'AI: {response_text}\n')
+
+    return response_text
+
+st.title('Voice Assistant with Google Generative AI')
+st.write('Use your voice to interact with the AI.')
+
+if st.button('Start Listening'):
+    recognizer = sr.Recognizer()
     mic = sr.Microphone()
-    rec.dynamic_energy_threshold = False
-    rec.energy_threshold = 400
-    sleeping = True
-
-    while True:
-        with mic as source1:
-            rec.adjust_for_ambient_noise(source1, duration=0.5)
-            print("Listening .................")
-
-            try:
-                audio = rec.listen(source1, timeout=10, phrase_time_limit=15)
-                text = rec.recognize_google(audio)
-
-                if sleeping:
-                    if 'jack' in text.lower():
-                        request = text.lower().split("jack")[1]
-                        sleeping = False
-                        append2log(f'_' * 40)
-                        talk = []
-                        today = str(date.today())
-
-                        if len(request) < 5:
-                            speak_text('hi, there, how can I help you?')
-                            append2log(f'AI: hi, there, how can I help you?\n')
-                            continue
-                    else:
-                        continue
-                else:
-                    request = text.lower()
-
-                    if "that's all" in request:
-                        append2log(f'You: {request}\n')
-                        speak_text('Bye Now')
-                        append2log(f"AI: Bye Now.\n")
-                        print('bye now')
-                        sleeping = True
-                        continue
-
-                    if 'jack' in request:
-                        request = request.split('jack')[1]
-
-                append2log(f"You: {request}\n")
-                print(f'You: {request}\nAI: ')
-                talk.append({'role': 'user', 'parts': [request]})
-
-                response = model.generate_content(talk, stream=True)
-                for chunk in response:
-                    print(chunk.text, end=' ')
-                    speak_text(chunk.text.replace("*", ""))
-
-                print('\n')
-                talk.append({'role': 'model', 'parts': [response.text]})
-                append2log(f'AI: {response.text}\n')
-            except Exception as e:
-                continue
-
-if __name__ == '__main__':
-    main()
+    
+    with mic as source:
+        st.write("Listening...")
+        recognizer.adjust_for_ambient_noise(source, duration=0.5)
+        audio = recognizer.listen(source)
+    
+    try:
+        request = recognizer.recognize_google(audio)
+        st.write(f"You said: {request}")
+        if 'jack' in request.lower():
+            request = request.lower().split("jack")[1].strip()
+            response = process_request(request)
+            st.write(f"AI: {response}")
+        else:
+            st.write("Please address the request to 'Jack'.")
+    except sr.UnknownValueError:
+        st.write("Google Speech Recognition could not understand the audio")
+    except sr.RequestError as e:
+        st.write(f"Could not request results from Google Speech Recognition service; {e}")
